@@ -440,7 +440,6 @@ class Text extends AbstractFrameReflower
         $frame = $this->_frame;
         $style = $frame->get_style();
         $this->_block_parent = $frame->find_block_parent();
-        $line_width = $frame->get_containing_block("w");
         $fontMetrics = $this->getFontMetrics();
 
         $str = $text = $frame->get_text();
@@ -509,12 +508,15 @@ class Text extends AbstractFrameReflower
         }
         $max = $fontMetrics->getTextWidth($str, $font, $size, $word_spacing, $char_spacing);
 
-        $delta = (float)$style->length_in_pt([$style->margin_left,
+        // The containing block is not defined yet, treat percentages as 0
+        $delta = (float)$style->length_in_pt([
+            $style->margin_left,
             $style->border_left_width,
             $style->padding_left,
             $style->padding_right,
             $style->border_right_width,
-            $style->margin_right], $line_width);
+            $style->margin_right
+        ], 0);
         $min += $delta;
         $min_word = $min;
         $max += $delta;
@@ -530,7 +532,7 @@ class Text extends AbstractFrameReflower
             $min = $delta + $min_char;
         }
 
-        return $this->_min_max_cache = [$min, $max, $min_word, "min" => $min, "max" => $max, 'min_word' => $min_word];
+        return $this->_min_max_cache = [$min, $max, $min_word, "min" => $min, "max" => $max, "min_word" => $min_word];
     }
 
     /**
@@ -543,7 +545,6 @@ class Text extends AbstractFrameReflower
     {
         $frame = $this->_frame;
         $style = $frame->get_style();
-        $line_width = $frame->get_containing_block("w");
         $fontMetrics = $this->getFontMetrics();
 
         $str = $frame->get_node()->textContent;
@@ -606,7 +607,8 @@ class Text extends AbstractFrameReflower
             $style->border_left_width,
             $style->padding_left
         ];
-        $delta = (float) $style->length_in_pt($widths, $line_width);
+        // The containing block is not defined yet, treat percentages as 0
+        $delta = (float) $style->length_in_pt($widths, 0);
 
         return [$min + $delta, $includesAll, $delta];
     }
