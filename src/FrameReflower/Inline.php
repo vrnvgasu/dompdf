@@ -9,8 +9,8 @@ namespace Dompdf\FrameReflower;
 
 use Dompdf\Frame;
 use Dompdf\FrameDecorator\Block as BlockFrameDecorator;
+use Dompdf\FrameDecorator\Inline as InlineFrameDecorator;
 use Dompdf\FrameDecorator\Text as TextFrameDecorator;
-use Dompdf\FrameReflower\Text as TextFrameReflower;
 
 /**
  * Reflows inline frames
@@ -19,14 +19,54 @@ use Dompdf\FrameReflower\Text as TextFrameReflower;
  */
 class Inline extends AbstractFrameReflower
 {
-
     /**
      * Inline constructor.
-     * @param Frame $frame
+     * @param InlineFrameDecorator $frame
      */
-    function __construct(Frame $frame)
+    function __construct(InlineFrameDecorator $frame)
     {
         parent::__construct($frame);
+    }
+
+    /**
+     * Handle pre-layout of empty inline frames: Add a new line to the block
+     * parent and split parent inline frames as necessary.
+     *
+     * Regular inline frames are re-positioned together with their text-frame
+     * (or inline) children as necessary during child reflow. Empty inline
+     * frames have no children that could handle the re-positioning, so the
+     * decision of wether to move them to a new line needs to be handled
+     * separately.
+     *
+     * @param BlockFrameDecorator $block
+     * @return bool Whether an inline ancestor was split before the frame.
+     */
+    protected function pre_layout_empty(BlockFrameDecorator $block): bool
+    {
+        $frame = $this->_frame;
+        $cb = $frame->get_containing_block();
+        $line = $block->get_current_line_box();
+        $width = $frame->get_margin_width();
+
+        if ($width > ($cb["w"] - $line->left - $line->w - $line->right)) {
+            $block->add_line();
+
+            // Find the appropriate inline ancestor to split
+            $child = $frame;
+            $p = $child->get_parent();
+            while ($p instanceof InlineFrameDecorator && !$child->get_prev_sibling()) {
+                $child = $p;
+                $p = $p->get_parent();
+            }
+
+            if ($p instanceof InlineFrameDecorator) {
+                // Split parent and stop current reflow
+                $p->split($child);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -34,6 +74,7 @@ class Inline extends AbstractFrameReflower
      */
     function reflow(BlockFrameDecorator $block = null)
     {
+        /** @var InlineFrameDecorator */
         $frame = $this->_frame;
 
         // Check if a page break is forced
@@ -80,14 +121,21 @@ class Inline extends AbstractFrameReflower
             $l_style->border_right = $style->border_right;
         }
 
-        $frame->position();
+        // Handle empty inline frames
+        // `br` frames are handled in `add_frame_to_line` below
+        if (!$frame->get_first_child() && $frame->get_node()->nodeName !== "br") {
+            // Resolve width, so the margin width can be checked
+            $style->width = 0;
+            $split = $this->pre_layout_empty($block);
 
-        // If positioning necessitates a parent split, then the position is not
-        // set. The frame will have a new reflow via the new split parent
-        if ($frame->get_position("x") === null) {
-            return;
+            // Stop current reflow if a parent inline frame was split. Reflow
+            // continues via child-reflow loop of split parent
+            if ($split) {
+                return;
+            }
         }
 
+        $frame->position();
         $cb = $frame->get_containing_block();
 
         if ($block) {
@@ -99,70 +147,17 @@ class Inline extends AbstractFrameReflower
         foreach ($frame->get_children() as $child) {
             $child->set_containing_block($cb);
             $child->reflow($block);
+
+            // Stop reflow of subsequent children if the frame was split within
+            // child reflow
+            if ($child->get_parent() !== $frame) {
+                break;
+            }
         }
 
         // Handle relative positioning
         foreach ($frame->get_children() as $child) {
             $this->position_relative($child);
         }
-    }
-
-    /**
-     * Get the minimum width needed for the first line of the frame, including
-     * the margin box.
-     *
-     * @return array A pair of values: The minimum width, and whether it
-     * includes the right margin box because the entire frame is covered.
-     */
-    public function get_min_first_line_width(): array
-    {
-        // FIXME This should not be completely correct: White-space styling
-        // might affect the layout, such that several children have to be
-        // considered. The right way to do this would probably be a (partial)
-        // reflow of the frame
-        $frame = $this->_frame;
-        $firstChild = $frame->get_first_child();
-
-        if ($firstChild === null) {
-            return [0.0, true];
-        }
-
-        $hasSibling = $firstChild->get_next_sibling() !== null;
-        $reflower = $firstChild->get_reflower();
-
-        if ($reflower instanceof TextFrameReflower) {
-            [$min, $includesAll, $childDelta] = $reflower->get_min_first_line_width();
-            $applyRightWidths = $includesAll && !$hasSibling;
-        } elseif ($reflower instanceof self) {
-            [$min, $includesAll] = $reflower->get_min_first_line_width();
-            $applyRightWidths = $includesAll && !$hasSibling;
-        } else {
-            [$min] = $reflower->get_min_max_width();
-            $applyRightWidths = !$hasSibling;
-        }
-
-        // Because currently margin, border, and padding are not handled on the
-        // inline frame itself, but applied to first resp. last text child, we
-        // only want to add these here if they have not been applied to the
-        // children yet (which can happen in case of nested inline children)
-        $style = $frame->get_style();
-        $line_width = $frame->get_containing_block("w");
-        $widths = $applyRightWidths ? [
-            $style->margin_left,
-            $style->border_left_width,
-            $style->padding_left,
-            $style->padding_right,
-            $style->border_right_width,
-            $style->margin_right
-        ] : [
-            $style->margin_left,
-            $style->border_left_width,
-            $style->padding_left
-        ];
-        $delta = isset($childDelta) && $childDelta === 0.0
-            ? (float) $style->length_in_pt($widths, $line_width)
-            : 0.0;
-
-        return [$min + $delta, $applyRightWidths];
     }
 }
