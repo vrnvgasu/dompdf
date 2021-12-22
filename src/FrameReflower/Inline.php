@@ -7,7 +7,6 @@
  */
 namespace Dompdf\FrameReflower;
 
-use Dompdf\Frame;
 use Dompdf\FrameDecorator\Block as BlockFrameDecorator;
 use Dompdf\FrameDecorator\Inline as InlineFrameDecorator;
 use Dompdf\FrameDecorator\Text as TextFrameDecorator;
@@ -29,21 +28,23 @@ class Inline extends AbstractFrameReflower
     }
 
     /**
-     * Handle pre-layout of empty inline frames: Add a new line to the block
-     * parent and split parent inline frames as necessary.
+     * Handle reflow of empty inline frames.
      *
-     * Regular inline frames are re-positioned together with their text-frame
-     * (or inline) children as necessary during child reflow. Empty inline
-     * frames have no children that could handle the re-positioning, so the
-     * decision of wether to move them to a new line needs to be handled
-     * separately.
+     * Regular inline frames are positioned together with their text (or inline)
+     * children after child reflow. Empty inline frames have no children that
+     * could determine the positioning, so they need to be handled separately.
      *
      * @param BlockFrameDecorator $block
-     * @return bool Whether an inline ancestor was split before the frame.
      */
-    protected function pre_layout_empty(BlockFrameDecorator $block): bool
+    protected function reflow_empty(BlockFrameDecorator $block): void
     {
+        /** @var InlineFrameDecorator */
         $frame = $this->_frame;
+        $style = $frame->get_style();
+
+        // Resolve width, so the margin width can be checked
+        $style->width = 0;
+
         $cb = $frame->get_containing_block();
         $line = $block->get_current_line_box();
         $width = $frame->get_margin_width();
@@ -60,13 +61,15 @@ class Inline extends AbstractFrameReflower
             }
 
             if ($p instanceof InlineFrameDecorator) {
-                // Split parent and stop current reflow
+                // Split parent and stop current reflow. Reflow continues
+                // via child-reflow loop of split parent
                 $p->split($child);
-                return true;
+                return;
             }
         }
 
-        return false;
+        $frame->position();
+        $block->add_frame_to_line($frame);
     }
 
     /**
@@ -85,10 +88,10 @@ class Inline extends AbstractFrameReflower
             return;
         }
 
-        $style = $frame->get_style();
-
         // Generated content
         $this->_set_content();
+
+        $style = $frame->get_style();
 
         // Resolve auto margins
         // https://www.w3.org/TR/CSS21/visudet.html#inline-width
@@ -106,6 +109,32 @@ class Inline extends AbstractFrameReflower
             $style->margin_bottom = 0;
         }
 
+        // Handle line breaks
+        if ($frame->get_node()->nodeName === "br") {
+            if ($block) {
+                $line = $block->get_current_line_box();
+                $frame->set_containing_line($line);
+                $block->maximize_line_height($frame->get_margin_height(), $frame);
+                $block->add_line(true);
+
+                $next = $frame->get_next_sibling();
+                $p = $frame->get_parent();
+
+                if ($next && $p instanceof InlineFrameDecorator) {
+                    $p->split($next);
+                }
+            }
+            return;
+        }
+
+        // Handle empty inline frames
+        if (!$frame->get_first_child()) {
+            if ($block) {
+                $this->reflow_empty($block);
+            }
+            return;
+        }
+
         // Add our margin, padding & border to the first and last children
         if (($f = $frame->get_first_child()) && $f instanceof TextFrameDecorator) {
             $f_style = $f->get_style();
@@ -121,26 +150,7 @@ class Inline extends AbstractFrameReflower
             $l_style->border_right = $style->border_right;
         }
 
-        // Handle empty inline frames
-        // `br` frames are handled in `add_frame_to_line` below
-        if (!$frame->get_first_child() && $frame->get_node()->nodeName !== "br") {
-            // Resolve width, so the margin width can be checked
-            $style->width = 0;
-            $split = $this->pre_layout_empty($block);
-
-            // Stop current reflow if a parent inline frame was split. Reflow
-            // continues via child-reflow loop of split parent
-            if ($split) {
-                return;
-            }
-        }
-
-        $frame->position();
         $cb = $frame->get_containing_block();
-
-        if ($block) {
-            $block->add_frame_to_line($frame);
-        }
 
         // Set the containing blocks and reflow each child.  The containing
         // block is not changed by line boxes.
@@ -155,9 +165,17 @@ class Inline extends AbstractFrameReflower
             }
         }
 
+        // Assume the position of the first child
+        [$x, $y] = $frame->get_first_child()->get_position();
+        $frame->set_position($x, $y);
+
         // Handle relative positioning
         foreach ($frame->get_children() as $child) {
             $this->position_relative($child);
+        }
+
+        if ($block) {
+            $block->add_frame_to_line($frame);
         }
     }
 }
