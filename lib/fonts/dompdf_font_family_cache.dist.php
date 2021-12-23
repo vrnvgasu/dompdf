@@ -11,17 +11,16 @@ return function ($rootDir) {
             ],
         'times' =>
             [
-                'normal' => $distFontDir . '/Times-Roman',
-                'bold' => $distFontDir . '/Times-Bold',
-                'italic' => $distFontDir . '/Times-Italic',
-                'bold_italic' => $distFontDir . '/Times-BoldItalic'
+                'normal' => $distFontDir . '/times',
+                'bold' => $distFontDir . '/timesbd',
+                'italic' => $distFontDir . '/timesi',
+                'bold_italic' => $distFontDir . '/timesbi'
             ],
-        'times-roman' =>
-            [
-                'normal' => $distFontDir . '/Times-Roman',
-                'bold' => $distFontDir . '/Times-Bold',
-                'italic' => $distFontDir . '/Times-Italic',
-                'bold_italic' => $distFontDir . '/Times-BoldItalic'
+        'times-roman' => [
+                'normal' => $distFontDir . '/times',
+                'bold' => $distFontDir . '/timesbd',
+                'italic' => $distFontDir . '/timesi',
+                'bold_italic' => $distFontDir . '/timesbi'
             ],
         'courier' =>
             [
